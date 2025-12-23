@@ -85,10 +85,11 @@
         </div>
       </div>
 
-      <!-- Grafik Perbandingan Masuk vs Keluar -->
+      <!-- Grafik Perbandingan Masuk vs Keluar - FIXED -->
       <div class="chart-card full-width">
         <div class="chart-header">
           <h3>🔄 Perbandingan Masuk vs Keluar (Hari Ini)</h3>
+          <small style="color: #99b4d6;">{{ todayLabel }}</small>
         </div>
         <div class="comparison-stats">
           <div class="stat-box masuk">
@@ -143,9 +144,19 @@ const dailyChart = ref(null)
 const hourlyChartInstance = ref(null)
 const dailyChartInstance = ref(null)
 const chartDataReady = ref(false)
+const updateKey = ref(0) // Force reactivity trigger
 
 // Realtime
 let realtimeChannel = null
+
+// Helper: Get today date string (YYYY-MM-DD)
+const getTodayDateString = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 // Format waktu
 const formatWaktu = (isoString) => {
@@ -155,21 +166,37 @@ const formatWaktu = (isoString) => {
   return `${day} ${month}`
 }
 
-// Computed - Data Hari Ini
+// Computed - Label hari ini
+const todayLabel = computed(() => {
+  const now = new Date()
+  const day = now.getDate()
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+  const month = months[now.getMonth()]
+  const year = now.getFullYear()
+  return `${day} ${month} ${year}`
+})
+
+// Computed - Data Hari Ini (FIXED with reactivity trigger)
 const masukHariIni = computed(() => {
-  const today = new Date().toDateString()
-  return logs.value.filter(log => {
-    const logDate = new Date(log.waktu).toDateString()
+  updateKey.value // Force reactivity
+  const today = getTodayDateString()
+  const filtered = logs.value.filter(log => {
+    const logDate = log.waktu.split('T')[0] // Ambil bagian tanggal saja (YYYY-MM-DD)
     return logDate === today && log.status === 'Masuk'
-  }).length
+  })
+  console.log('✅ Masuk hari ini:', filtered.length, 'dari total', logs.value.length)
+  return filtered.length
 })
 
 const keluarHariIni = computed(() => {
-  const today = new Date().toDateString()
-  return logs.value.filter(log => {
-    const logDate = new Date(log.waktu).toDateString()
+  updateKey.value // Force reactivity
+  const today = getTodayDateString()
+  const filtered = logs.value.filter(log => {
+    const logDate = log.waktu.split('T')[0] // Ambil bagian tanggal saja (YYYY-MM-DD)
     return logDate === today && log.status === 'Keluar'
-  }).length
+  })
+  console.log('✅ Keluar hari ini:', filtered.length, 'dari total', logs.value.length)
+  return filtered.length
 })
 
 const selisihHariIni = computed(() => masukHariIni.value - keluarHariIni.value)
@@ -180,18 +207,22 @@ const totalHariIni = computed(() => masukHariIni.value + keluarHariIni.value)
 const totalMasuk7Hari = computed(() => {
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0]
+  
   return logs.value.filter(log => {
-    const logDate = new Date(log.waktu)
-    return logDate >= sevenDaysAgo && log.status === 'Masuk'
+    const logDate = log.waktu.split('T')[0]
+    return logDate >= sevenDaysAgoStr && log.status === 'Masuk'
   }).length
 })
 
 const totalKeluar7Hari = computed(() => {
   const sevenDaysAgo = new Date()
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0]
+  
   return logs.value.filter(log => {
-    const logDate = new Date(log.waktu)
-    return logDate >= sevenDaysAgo && log.status === 'Keluar'
+    const logDate = log.waktu.split('T')[0]
+    return logDate >= sevenDaysAgoStr && log.status === 'Keluar'
   }).length
 })
 
@@ -199,7 +230,9 @@ const totalKeluar7Hari = computed(() => {
 const jamTersibuk = computed(() => {
   const hourlyData = getHourlyData()
   const totals = hourlyData.masuk.map((m, i) => m + hourlyData.keluar[i])
-  const maxIndex = totals.indexOf(Math.max(...totals))
+  const maxTotal = Math.max(...totals)
+  if (maxTotal === 0) return '-'
+  const maxIndex = totals.indexOf(maxTotal)
   return hourlyData.hours[maxIndex] || '-'
 })
 
@@ -215,6 +248,7 @@ const fetchLogs = async () => {
     if (error) throw error
     logs.value = data || []
     console.log('📊 Total log dimuat:', logs.value.length)
+    console.log('📅 Tanggal hari ini:', getTodayDateString())
   } catch (error) {
     console.error('❌ Error fetching logs:', error)
   } finally {
@@ -226,26 +260,26 @@ const getHourlyData = () => {
   const hours = []
   const masukData = []
   const keluarData = []
-  const today = new Date().toDateString()
+  const today = getTodayDateString()
   
   // Buat array 24 jam (00:00 - 23:00)
   for (let i = 0; i < 24; i++) {
     const hourLabel = `${String(i).padStart(2, '0')}:00`
     hours.push(hourLabel)
     
-    // Filter log berdasarkan jam
+    // Filter log berdasarkan jam (UTC timezone)
     const masuk = logs.value.filter(log => {
-      const logDate = new Date(log.waktu)
-      return logDate.toDateString() === today && 
-             logDate.getUTCHours() === i && 
-             log.status === 'Masuk'
+      const logDate = log.waktu.split('T')[0]
+      const logTime = new Date(log.waktu)
+      const logHour = logTime.getUTCHours()
+      return logDate === today && logHour === i && log.status === 'Masuk'
     }).length
     
     const keluar = logs.value.filter(log => {
-      const logDate = new Date(log.waktu)
-      return logDate.toDateString() === today && 
-             logDate.getUTCHours() === i && 
-             log.status === 'Keluar'
+      const logDate = log.waktu.split('T')[0]
+      const logTime = new Date(log.waktu)
+      const logHour = logTime.getUTCHours()
+      return logDate === today && logHour === i && log.status === 'Keluar'
     }).length
     
     masukData.push(masuk)
@@ -263,15 +297,15 @@ const getDailyData = () => {
   for (let i = 6; i >= 0; i--) {
     const date = new Date()
     date.setDate(date.getDate() - i)
-    const dateStr = date.toDateString()
+    const dateStr = date.toISOString().split('T')[0]
     
     const masuk = logs.value.filter(log => {
-      const logDate = new Date(log.waktu).toDateString()
+      const logDate = log.waktu.split('T')[0]
       return logDate === dateStr && log.status === 'Masuk'
     }).length
     
     const keluar = logs.value.filter(log => {
-      const logDate = new Date(log.waktu).toDateString()
+      const logDate = log.waktu.split('T')[0]
       return logDate === dateStr && log.status === 'Keluar'
     }).length
     
@@ -495,8 +529,23 @@ const setupRealtime = () => {
         table: 'log'
       },
       (payload) => {
-        console.log('🔔 Log baru, update chart:', payload.new)
-        logs.value.unshift(payload.new)
+        console.log('🔔 Log baru masuk:', payload.new)
+        
+        // Tambah data baru ke array dengan cara reaktif
+        logs.value = [payload.new, ...logs.value]
+        
+        // Force trigger reactivity
+        updateKey.value++
+        
+        // Log untuk debugging
+        const logDate = payload.new.waktu.split('T')[0]
+        const today = getTodayDateString()
+        console.log('📅 Log date:', logDate, '| Today:', today, '| Match:', logDate === today)
+        console.log('📊 Status:', payload.new.status)
+        console.log('🔄 Update key:', updateKey.value)
+        console.log('📈 Masuk sekarang:', masukHariIni.value, '| Keluar sekarang:', keluarHariIni.value)
+        
+        // Update charts
         createHourlyChart()
         createDailyChart()
       }
